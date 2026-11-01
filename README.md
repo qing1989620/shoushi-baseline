@@ -7,7 +7,7 @@
 - `train.py`：模型训练和测试集评估。
 - `camera.py`：摄像头实时检测。
 - `data/rps_real_full/`：已标注训练、验证和测试数据，详细来源见其中 `PROVENANCE.md`。
-- `runs/detect/rps_final/weights/best.pt`：训练好的模型。
+- `runs/detect/rps_final/weights/best.pt`：运行训练后生成的模型（仓库不提供训练好的手势权重）。
 - `算法方向方案.pdf`：项目任务书，包含数据来源及仓库链接。
 
 ## 安装
@@ -27,15 +27,9 @@ python -m venv --system-site-packages .venv-camera
 
 后续命令中的 `python` 可替换为 `.\.venv-camera\Scripts\python.exe`。
 
-## 摄像头识别
-
-```powershell
-python camera.py --device 0
-```
-
-按 Q 或 Esc 退出；摄像头编号不是 0 时使用 `--source 1`。无 NVIDIA 显卡可使用 `--device cpu`。默认置信度阈值为 `0.45`，并对重叠框进行去重：降低 `--conf` 可能减少漏检，但也可能增加误报；遮挡导致不同手的框高度重叠时，去重可能合并两个目标，可试 `--nms-iou 1` 关闭。程序退出后记录帧数、FPS、纯推理耗时及取帧至 `imshow` 返回的耗时，建议采集至少 300 帧。该时间不含 `waitKey`，`imshow` 返回也不等于屏幕实际完成刷新。
-
 ## 训练与评估
+
+**仓库不包含训练好的手势模型，请先训练，再运行摄像头。**
 
 ```powershell
 python train.py --device 0 --epochs 50 --batch 4 --imgsz 320 --workers 0
@@ -46,7 +40,17 @@ python train.py --background-test --device 0 --workers 0
 python train.py --evaluate --data data/rps_real_full/real_test.yaml --device 0 --workers 0
 ```
 
-首次训练会下载 Ultralytics 的 `rtdetr-l.pt` 预训练权重。训练输出路径由程序打印；已有同名目录时会创建新目录。用新权重评估或打开摄像头时，添加 `--weights 新权重路径`。训练默认禁用 Mosaic 以降低内存压力；旋转增强可用 `--degrees 30` 指定。
+首次训练会从 Ultralytics 下载通用预训练权重 `rtdetr-l.pt` 作为初始化，再使用本项目数据训练；这不是仓库提供的已训练手势模型。训练输出路径由程序打印；已有同名目录时会创建新目录。用新权重评估或打开摄像头时，添加 `--weights 新权重路径`。训练默认禁用 Mosaic 以降低内存压力；旋转增强可用 `--degrees 30` 指定。
+
+## 摄像头识别
+
+训练结束后运行以下命令，默认加载 `runs/detect/rps_final/weights/best.pt`：
+
+```powershell
+python camera.py --device 0
+```
+
+如训练时生成了其他路径，请用 `--weights 训练输出的best.pt路径` 指定。按 Q 或 Esc 退出；摄像头编号不是 0 时使用 `--source 1`。无 NVIDIA 显卡可使用 `--device cpu`。默认置信度阈值为 `0.45`，并对重叠框进行去重：降低 `--conf` 可能减少漏检，但也可能增加误报；遮挡导致不同手的框高度重叠时，去重可能合并两个目标，可试 `--nms-iou 1` 关闭。程序退出后记录帧数、FPS、纯推理耗时及取帧至 `imshow` 返回的耗时，建议采集至少 300 帧。该时间不含 `waitKey`，`imshow` 返回也不等于屏幕实际完成刷新。
 
 ## 数据说明
 
@@ -64,7 +68,7 @@ python train.py --evaluate --data data/rps_real_full/real_test.yaml --device 0 -
 
 ## 本次模型测试
 
-当前权重在前一版 8 轮 RT-DETR 模型基础上，加入无手背景样本微调 4 轮；使用 RTX 4050 Laptop GPU、320 输入、batch 4、AdamW、学习率 0.0001 和 `warmup=0.5`。此前初始化权重位于本仓库历史提交 `23e5a37`；当前仓库只保留一个可直接使用的模型。
+以下为开发期间一次训练的历史参考结果，**仓库不提供该手势模型权重**；重新训练得到的结果可能不同。该实验在此前 8 轮 RT-DETR 模型基础上加入无手背景样本微调 4 轮，使用 RTX 4050 Laptop GPU、320 输入、batch 4、AdamW、学习率 0.0001 和 `warmup=0.5`。
 
 | 测试 | 本次结果 |
 |---|---|
