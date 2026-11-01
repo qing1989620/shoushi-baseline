@@ -26,7 +26,7 @@ def camera_source(value):
 
 def main():
     parser = argparse.ArgumentParser(description="RT-DETR 摄像头手势检测")
-    parser.add_argument("--weights", default="runs/detect/rps_baseline/weights/best.pt", help="训练得到的权重")
+    parser.add_argument("--weights", default="runs/detect/rps_final/weights/best.pt", help="训练得到的权重")
     parser.add_argument("--source", default="0", help="摄像头编号、视频路径或视频流地址，默认 0")
     parser.add_argument("--device", default=None, help="推理设备，如 cpu、0；默认自动选择")
     parser.add_argument("--conf", type=float, default=0.25, help="检测置信度阈值")

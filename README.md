@@ -1,87 +1,67 @@
-# 石头剪刀布目标检测 Baseline
+# 石头剪刀布手势检测 Baseline
 
-本项目实现任务书的基础流程：同源分类图像 → 生成待核查的检测框 → 微调带 Transformer 解码器的 RT-DETR → 固定测试集评估 → 用训练出的权重进行实时摄像头检测。类别固定为 `0 Rock`、`1 Scissors`、`2 Paper`。检测器可输出多个框，但单手图像训练不保证多人、复杂环境或实时速度达到任务目标，需要实测。
+一套可供学生学习的 RT-DETR 目标检测基线：使用 `train.py` 训练模型，用 `camera.py` 调用训练好的模型进行实时手势检测。类别固定为 `0 Rock（石头）`、`1 Scissors（剪刀）`、`2 Paper（布）`。检测画面可以输出多个目标的框、类别与置信度，实际识别效果取决于手势、环境和硬件。
 
-## 1. 环境
+## 文件说明
 
-建议 Python 3.10–3.12，Windows/Linux；训练推荐 NVIDIA GPU。先按 [PyTorch 官方安装指引](https://pytorch.org/get-started/locally/)安装匹配显卡和驱动的 PyTorch，然后：
+- `train.py`：模型训练和测试集评估。
+- `camera.py`：摄像头实时检测。
+- `data/rps_real_full/`：已标注训练、验证和测试数据，详细来源见其中 `PROVENANCE.md`。
+- `runs/detect/rps_final/weights/best.pt`：训练好的模型。
+- `算法方向方案.pdf`：项目任务书，包含数据来源及仓库链接。
+
+## 安装
+
+建议 Python 3.10–3.12；有 NVIDIA 显卡时先安装与驱动匹配的 [PyTorch](https://pytorch.org/get-started/locally/)，然后运行：
 
 ```powershell
 python -m pip install -r requirements.txt
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-`True` 表示 PyTorch 能使用 CUDA。CPU 可用，但 RT-DETR 训练和推理会慢。Windows 可将下列命令中的 `python` 替换成虚拟环境的 Python。
-
-## 2. 数据与标注
-
-任务书指定 Laurence Moroney 数据经虚谷号缩放并打包的 `hand.tar`，参见 [教程](https://mc.dfrobot.com.cn/article-361023.html) 与 [镜像仓库](https://gitee.com/xiezuoru/vvBoard-docs)。该包是图像分类数据，**不含检测框**。当前仓库中的数据不是核验过的 `hand.tar`：公开仓库当前版本未找到该文件，因此使用 [TensorFlow 数据集构建器](https://github.com/tensorflow/datasets/blob/master/tensorflow_datasets/datasets/rock_paper_scissors/rock_paper_scissors_dataset_builder.py) 所指同源原图，将其缩放至 128×128 重建。尚不能证明与指定压缩包逐文件一致；若社团统一发放原包，须重新转换并统一评估。来源、SHA-256、数量见 `data/provenance.json`，生成方法见 `reconstruct_dataset.py`。原始训练源 2520 张、原始测试集 372 张。
-
-本项目采用图像边缘的背景颜色估计前景，再取最大连通区域生成一个矩形框。生成结果只是伪标注；必须抽样检查三类及三个数据划分，修正有误的框，并在报告中说明方法和质量。基于这些框计算的检测指标并不等同于人工真实标注指标。
-
-仓库已包含准备好的 `data/rps/data.yaml`（路径相对于 YAML，适合克隆后使用）。可直接查看 `data/rps/manifest.csv` 和图像/标签。重新生成时首先准备好如下结构（`data/raw/hand`）。也可以下载 `data/provenance.json` 中列出的两个 ZIP 到 `data/raw/downloads/`，分别命名为 `rps.zip` 和 `rps-test-set.zip`，核对 SHA-256 后执行 `python reconstruct_dataset.py`：
-
-```text
-hand/
-  rps/{rock,scissors,paper}/...
-  rps-test-set/{rock,scissors,paper}/...
-```
-
-保留原始 `rps-test-set` 作为 test，按类别、种子 42 将 `rps` 的 90%/10% 划分为 train/val。对于没有既定测试集的数据不能直接套用本脚本；这符合任务书对既定测试集的优先规则。原包内其它目录不会混入训练或测试。脚本会检查跨训练源和测试源的完全相同图像并停止，避免数据泄漏。不会执行线下图像增强。输出目录必须不存在或为空，避免覆盖人工修正。
-
-```powershell
-python prepare_dataset.py --source data/raw/hand --output data/rps_rebuilt
-python review_labels.py --data data/rps_rebuilt --split train --output review_train.jpg
-python review_labels.py --data data/rps_rebuilt --split val --output review_val.jpg
-python review_labels.py --data data/rps_rebuilt --split test --output review_test.jpg
-```
-
-重建后训练/评估时用 `--data data/rps_rebuilt/data.yaml` 指向新数据。检查拼图中的框并按文件名前缀在 `data/rps_rebuilt/images/<划分>` 找到原图，在对应 `labels/<划分>/<同名>.txt` 修改 YOLO 格式标签 `类别 中心x 中心y 宽 高`（坐标归一化到 0–1），可使用 LabelImg 等标注工具。`manifest.csv` 的 `review_flag=1` 只是提醒，不代表其他框都正确；建议按类别与划分抽样，保存检查数和错误数。若生成中断，请处理错误后使用新的空输出目录重跑。
-
-## 3. 训练
-
-首次运行会由 Ultralytics 下载 COCO 预训练的 `rtdetr-l.pt`；随后在本数据上进行真实微调。请记录框架版本、预训练权重来源、训练参数和日志；下载失败时自行放置官方权重并使用 `--model 路径`。
-
-```powershell
-python train.py --device 0 --epochs 50 --batch 4 --imgsz 320
-```
-
-默认输出 `runs/detect/rps_baseline/weights/best.pt`。再次运行时框架会创建 `rps_baseline2` 等新目录，**以终端打印的 Best weights 路径为准**，通过后续 `--weights` 指定。显存不足可降低 `--batch`；CPU 使用 `--device cpu`。训练参数与曲线保存在运行目录；固定随机种子不保证不同硬件完全一致。
-
-对照实验例子：保持其他参数一致，第二次训练加入 `--degrees 30 --name rps_rotate`，与默认 `--degrees 0` 比较，评估两个模型并如实记录；Ultralytics 的其他默认训练增强仍然存在，不应将框架默认增强当成自己的创新。
-
-## 4. 测试集评估
-
-```powershell
-python evaluate.py --device 0 --weights runs/detect/rps_baseline/weights/best.pt
-```
-
-输出固定 test 集的 mAP50、mAP50–95、Precision、Recall、各类 AP50 和框架生成的图表。需先核查测试集伪框；除模型选择所用验证集以外，不要依据 test 反复调参。自采困难场景与统一来源测试结果分开报告。
-
-## 5. 摄像头交互
-
-```powershell
-python camera.py --source 0 --device 0 --weights runs/detect/rps_baseline/weights/best.pt
-```
-
-每帧显示每个检测目标的类别、置信度和框，`Q` 或 `Esc` 退出。摄像头打不开可试 `--source 1`，或关闭占用摄像头的软件。通过 `--conf` 调整置信度阈值、`--imgsz` 调整输入尺寸。真实运行至少 300 帧后退出，`camera_metrics.json` 记录取帧到 `imshow` 返回的平均/P95耗时、模型推理耗时和总帧数/墙钟时间的 FPS；不包含 `waitKey` 在延迟内，且 `imshow` 返回并不保证物理屏幕已刷新。显示的单帧 FPS/延迟为上一帧值，不能代替统计。首次加载、预热和取帧会影响结果，报告须说明硬件和计时方法。视频文件也可通过 `--source 文件路径` 传入。
-
-### 摄像头窗口无法显示（Windows）
-
-如果报 `cvShowImage` / `The function is not implemented`，或者提示 OpenCV `GUI: NONE`，可能是同一个 Python 环境里安装了多个 OpenCV 包，加载到了 headless 版本。可在项目目录创建独立环境并单独安装带窗口支持的版本；以下方法复用系统里已经安装的 PyTorch 等依赖，不修改系统的 OpenCV：
+若 Windows 上提示 `OpenCV GUI: NONE` 或 `cvShowImage`，可能是全局环境的多个 OpenCV 包发生冲突。可以用独立环境复用已安装的依赖，并单独安装支持窗口的 OpenCV：
 
 ```powershell
 python -m venv --system-site-packages .venv-camera
 .\.venv-camera\Scripts\python.exe -m pip install --ignore-installed --no-deps opencv-python==4.13.0.92
-.\.venv-camera\Scripts\python.exe camera.py --device 0
 ```
 
-如果尚未安装本项目其他依赖，先按照环境章节安装。若要用 CPU，最后一行改为 `--device cpu`。
+后续命令中的 `python` 可替换为 `.\.venv-camera\Scripts\python.exe`。
 
-## 6. 已训练权重与测试结果
+## 摄像头识别
 
-仓库包含 RTX 4050 上经过 5 轮真实微调的默认权重。独立测试集 mAP50 为 **0.8022**，其中 Rock / Scissors / Paper 的 AP50 分别为 **0.9950 / 0.8434 / 0.5681**。完整训练设置、实验结果及局限见 [实验记录](metrics/experiment.md)。这些是同源重建图像和伪标注上的结果，不代表真实摄像头和多人场景效果。
+```powershell
+python camera.py --device 0
+```
 
-## 7. 验收与局限
+按 Q 或 Esc 退出；摄像头编号不是 0 时使用 `--source 1`。无 NVIDIA 显卡可使用 `--device cpu`；降低 `--conf` 会增加检出，同时可能产生更多误报。程序退出后记录帧数、FPS、纯推理耗时及取帧至 `imshow` 返回的耗时，建议采集至少 300 帧。该时间不含 `waitKey`，`imshow` 返回也不等于屏幕实际完成刷新。
 
-实际录制 60 秒以上，逐类切换并测试至少 2 手、尝试 3 手以上，记录漏检、重复框和遮挡。任务书还要求正面、左侧、右侧、俯视和 ±30° 六组以及至少三类困难场景的量化测试、模型改进对照、报告和真实演示视频；这些均须现场采样、逐项记录，代码不自动保证完成。训练图主要是白底单手，与真实多手环境存在差异：如识别不佳，优先改善标注并补充独立采集与标注的训练图，务必记录来源和划分，绝不把测试素材混进训练。
+## 训练与评估
+
+```powershell
+python train.py --device 0 --epochs 50 --batch 4 --imgsz 320 --workers 0
+python train.py --evaluate --device 0 --workers 0
+# 评估公开场景参考集（与统一来源 test 分开报告）
+python train.py --evaluate --data data/rps_real_full/real_test.yaml --device 0 --workers 0
+```
+
+首次训练会下载 Ultralytics 的 `rtdetr-l.pt` 预训练权重。训练输出路径由程序打印；已有同名目录时会创建新目录。用新权重评估或打开摄像头时，添加 `--weights 新权重路径`。训练默认禁用 Mosaic 以降低内存压力；旋转增强可用 `--degrees 30` 指定。
+
+## 数据说明
+
+数据集结合 Laurence Moroney 的石头剪刀布图像及 [Rock Paper Scissors 2 公开检测数据](https://universe.roboflow.com/rock-paper-scissors-2/rock-paper-scissors-bwev7)（[Hugging Face 镜像](https://huggingface.co/datasets/Xuban/rock-paper-scissors-roboflow)，发布者标注 CC BY 4.0）。原指定 `hand.tar` 未能获得，因此项目中的 128×128 同源重建图不能声称与该压缩包逐文件一致。其检测框由背景分割生成，仍是需要人工检查的伪标注；公开数据标签也可能存在错误。
+
+训练集共 3,353 张，其中统一来源 2,268 张、公开来源 1,085 张；验证集为 130 张公开来源图；`test` 为 372 张统一来源保留测试图，`official_val` 为其原验证划分；`real_test` 为 93 张公开数据参考图。公开图基于近似编号分组，并排除了部分与参考集近似的图片；该方法不能保证不同人的视频或近重复完全隔离，参考集含相似场景与连续帧，其评测不代表新用户摄像头的效果。来源、许可、划分与清单详见 `data/rps_real_full/PROVENANCE.md` 和 `manifest.csv`。现场采集的视频应与训练数据按人员和拍摄场次分开，且分别报告成绩。
+
+请按任务书实际测试不同方向、多人、复杂背景及 300 帧性能。公开数据和训练增强不保证能适应每台摄像头或每个人的姿势。
+
+## 本次模型测试
+
+仓库中的权重从 `rtdetr-l.pt` 开始微调 8 轮，使用 RTX 4050 Laptop GPU、输入 320、batch 4、`workers=0`。实际测试结果：
+
+| 测试 | 结果 |
+|---|---|
+| 同源保留测试集（372 张，自动框） | mAP50 **0.9950**；mAP50–95 **0.7594** |
+| 公开场景参考集（93 张，149 个框） | mAP50 **0.7996**；mAP50–95 **0.4717**；Rock / Scissors / Paper AP50 分别为 **0.7868 / 0.7202 / 0.8918** |
+| 另一来源绿底真人手势（每类 60 张） | 最高置信框的整图类别正确率 **53.3%**；Rock / Scissors / Paper 分别为 **36.7% / 23.3% / 100%** |
+
+绿底图片来自 [Julien de la Bruère-Terreault 的 Rock Paper Scissors 数据集](https://www.kaggle.com/datasets/drgfreeman/rockpaperscissors)（来源标注 CC BY-SA 4.0），每类按文件名字典序取前 60 张，阈值 0.25；它只有图像级标签，没有检测框，不能与检测 mAP 比较。图片场景和姿势较单一，不能代表普遍摄像头准确率。公开场景参考集参与过近重复筛除，亦不能视为严格独立于训练来源。真实摄像头测试暂只验证窗口与模型加载，不代表已完成准确率和多人测量；本模型对某些手势方向仍会误判。

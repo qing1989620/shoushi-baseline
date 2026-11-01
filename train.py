@@ -6,8 +6,10 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="Train an RT-DETR gesture detector")
-    parser.add_argument("--data", default="data/rps/data.yaml", help="Dataset YAML")
+    parser.add_argument("--data", default="data/rps_real_full/data.yaml", help="Dataset YAML")
     parser.add_argument("--model", default="rtdetr-l.pt", help="Pretrained weights or RT-DETR YAML")
+    parser.add_argument("--evaluate", action="store_true", help="Evaluate trained weights on the dataset test split")
+    parser.add_argument("--weights", default="runs/detect/rps_final/weights/best.pt", help="Trained weights for --evaluate")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--imgsz", type=int, default=320)
     parser.add_argument("--batch", type=int, default=4)
@@ -15,7 +17,7 @@ def main():
     parser.add_argument("--degrees", type=float, default=0.0, help="Rotation augmentation in degrees; 0 disables it")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--project", default="runs/detect")
-    parser.add_argument("--name", default="rps_baseline")
+    parser.add_argument("--name", default="rps_final")
     args = parser.parse_args()
     data = Path(args.data).expanduser().resolve()
     if not data.is_file():
@@ -25,13 +27,25 @@ def main():
 
     from ultralytics import RTDETR
 
+    if args.evaluate:
+        weights = Path(args.weights).expanduser().resolve()
+        if not weights.is_file():
+            parser.error(f"Weights not found: {weights}")
+        model = RTDETR(str(weights))
+        metrics = model.val(data=str(data), split="test", imgsz=args.imgsz, batch=args.batch, device=args.device, workers=args.workers)
+        box = metrics.box
+        print(f"Test mAP50={box.map50:.4f}, mAP50-95={box.map:.4f}, precision={box.mp:.4f}, recall={box.mr:.4f}")
+        for class_id, ap in zip(box.ap_class_index, box.ap50):
+            print(f"  {model.names[int(class_id)]}: {ap:.4f}")
+        return
+
     model = RTDETR(args.model)
     model.train(data=str(data), epochs=args.epochs, imgsz=args.imgsz, batch=args.batch,
                 device=args.device, workers=args.workers, project=str(Path(args.project).expanduser().resolve()),
-                name=args.name, degrees=args.degrees, seed=42, deterministic=True, exist_ok=False)
+                name=args.name, degrees=args.degrees, mosaic=0.0, seed=42, deterministic=True, exist_ok=False)
     weights = Path(model.trainer.save_dir).resolve() / "weights" / "best.pt"
     print(f"\nBest weights: {weights}")
-    print("Use this path with --weights in the camera and evaluation scripts.")
+    print("Use this path with --weights in camera.py or train.py --evaluate.")
 
 
 if __name__ == "__main__":

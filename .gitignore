@@ -18,3 +18,13 @@ evaluation.log
 
 .venv-camera/
 camera_gui_check.json
+data/hf_repo/
+data/real_source/
+data/rps_real/
+data/rps_composite/
+**/.cache/
+augment_composites.py
+tmp_*
+*.log
+output/
+.baseline-work/
