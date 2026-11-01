@@ -29,18 +29,20 @@ def main():
     parser.add_argument("--weights", default="runs/detect/rps_final/weights/best.pt", help="训练得到的权重")
     parser.add_argument("--source", default="0", help="摄像头编号、视频路径或视频流地址，默认 0")
     parser.add_argument("--device", default=None, help="推理设备，如 cpu、0；默认自动选择")
-    parser.add_argument("--conf", type=float, default=0.25, help="检测置信度阈值")
+    parser.add_argument("--conf", type=float, default=0.45, help="检测置信度阈值")
+    parser.add_argument("--nms-iou", type=float, default=0.7, help="同一位置重复框的去重阈值；1 表示关闭")
     parser.add_argument("--imgsz", type=int, default=320, help="推理输入图像尺寸")
     parser.add_argument("--metrics", default="camera_metrics.json", help="退出时写入的性能统计文件")
     args = parser.parse_args()
     weights = Path(args.weights)
     if not weights.is_file():
         parser.error(f"找不到模型权重：{weights}。请先训练，或通过 --weights 指定 best.pt。")
-    if not 0 <= args.conf <= 1 or args.imgsz <= 0:
-        parser.error("--conf 必须在 0 到 1 之间，--imgsz 必须大于 0。")
+    if not 0 <= args.conf <= 1 or not 0 < args.nms_iou <= 1 or args.imgsz <= 0:
+        parser.error("--conf 必须在 0 到 1 之间，--nms-iou 在 0 到 1 之间且大于 0，--imgsz 必须大于 0。")
     try:
         import cv2
         from ultralytics import RTDETR
+        from torchvision.ops import nms
     except ImportError as exc:
         parser.exit(1, f"缺少依赖：{exc}。请先按照 README 安装依赖。\n")
 
@@ -73,6 +75,10 @@ def main():
                 options["device"] = args.device
             result = model.predict(**options)[0]
             inference_ms.append(float(result.speed["inference"]))
+            # 按位置合并同一手部产生的高度重叠框，保留置信度最高的预测。
+            if args.nms_iou < 1 and len(result.boxes) > 1:
+                keep = nms(result.boxes.xyxy, result.boxes.conf, args.nms_iou)
+                result.boxes = result.boxes[keep]
             # plot 保留模型自身的类别名称、每个目标的框和置信度。
             shown = result.plot()
             if last_ms is not None:
@@ -108,6 +114,7 @@ def main():
                 "source": args.source,
                 "device": args.device,
                 "confidence": args.conf,
+                "duplicate_box_iou": args.nms_iou,
                 "image_size": args.imgsz,
             }
             metrics_path = Path(args.metrics)
