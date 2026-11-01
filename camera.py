@@ -44,6 +44,10 @@ def main():
     except ImportError as exc:
         parser.exit(1, f"缺少依赖：{exc}。请先按照 README 安装依赖。\n")
 
+    gui_line = next((line.strip() for line in cv2.getBuildInformation().splitlines() if line.strip().startswith("GUI:")), "")
+    if gui_line.split(":", 1)[-1].strip().upper() == "NONE":
+        parser.exit(1, "当前 OpenCV 不支持窗口显示（GUI: NONE），请参阅 README 的摄像头故障排查。\n")
+
     model = RTDETR(str(weights))
     capture = cv2.VideoCapture(camera_source(args.source))
     if not capture.isOpened():

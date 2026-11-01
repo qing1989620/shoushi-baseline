@@ -66,6 +66,18 @@ python camera.py --source 0 --device 0 --weights runs/detect/rps_baseline/weight
 
 每帧显示每个检测目标的类别、置信度和框，`Q` 或 `Esc` 退出。摄像头打不开可试 `--source 1`，或关闭占用摄像头的软件。通过 `--conf` 调整置信度阈值、`--imgsz` 调整输入尺寸。真实运行至少 300 帧后退出，`camera_metrics.json` 记录取帧到 `imshow` 返回的平均/P95耗时、模型推理耗时和总帧数/墙钟时间的 FPS；不包含 `waitKey` 在延迟内，且 `imshow` 返回并不保证物理屏幕已刷新。显示的单帧 FPS/延迟为上一帧值，不能代替统计。首次加载、预热和取帧会影响结果，报告须说明硬件和计时方法。视频文件也可通过 `--source 文件路径` 传入。
 
+### 摄像头窗口无法显示（Windows）
+
+如果报 `cvShowImage` / `The function is not implemented`，或者提示 OpenCV `GUI: NONE`，可能是同一个 Python 环境里安装了多个 OpenCV 包，加载到了 headless 版本。可在项目目录创建独立环境并单独安装带窗口支持的版本；以下方法复用系统里已经安装的 PyTorch 等依赖，不修改系统的 OpenCV：
+
+```powershell
+python -m venv --system-site-packages .venv-camera
+.\.venv-camera\Scripts\python.exe -m pip install --ignore-installed --no-deps opencv-python==4.13.0.92
+.\.venv-camera\Scripts\python.exe camera.py --device 0
+```
+
+如果尚未安装本项目其他依赖，先按照环境章节安装。若要用 CPU，最后一行改为 `--device cpu`。
+
 ## 6. 已训练权重与测试结果
 
 仓库包含 RTX 4050 上经过 5 轮真实微调的默认权重。独立测试集 mAP50 为 **0.8022**，其中 Rock / Scissors / Paper 的 AP50 分别为 **0.9950 / 0.8434 / 0.5681**。完整训练设置、实验结果及局限见 [实验记录](metrics/experiment.md)。这些是同源重建图像和伪标注上的结果，不代表真实摄像头和多人场景效果。

@@ -15,3 +15,6 @@ yolo26n.pt
 training.log
 training_*.log
 evaluation.log
+
+.venv-camera/
+camera_gui_check.json
