@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+tmp_test_source/
+tmp_test_output/
+tmp_test_review.jpg
+tmp_runs/
+runs/
+camera_metrics.json
+review_*.jpg
+data/raw/
+rtdetr-l.pt
+yolo26n.pt
+*.cache
+training.log
+training_*.log
+evaluation.log
